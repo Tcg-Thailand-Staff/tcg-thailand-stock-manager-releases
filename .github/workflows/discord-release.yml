@@ -1,0 +1,52 @@
+name: Notify Discord on release
+
+# Fires when a GitHub Release is published (after you attach the .exe and hit Publish).
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          WEBHOOK:   ${{ secrets.DISCORD_WEBHOOK }}
+          NAME:      ${{ github.event.release.name }}
+          TAG:       ${{ github.event.release.tag_name }}
+          PAGE_URL:  ${{ github.event.release.html_url }}
+          ASSET_URL: ${{ github.event.release.assets[0].browser_download_url }}
+          BODY:      ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK secret is not set — skipping."; exit 0
+          fi
+
+          title="🎉 ${NAME:-$TAG} ออกแล้ว!"
+          download="${ASSET_URL:-$PAGE_URL}"          # exe asset if present, else the release page
+          desc="${BODY:-}"
+          desc="${desc:0:3500}"                        # stay under Discord's 4096-char embed limit
+
+          payload=$(jq -n \
+            --arg title "$title" \
+            --arg url   "$PAGE_URL" \
+            --arg desc  "$desc" \
+            --arg dl    "$download" \
+            --arg tag   "$TAG" \
+            '{
+              username: "TCG Stock Manager",
+              content: "📦 มีเวอร์ชันใหม่ของ TCG Stock Manager",
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $desc,
+                color: 4154536,
+                fields: [
+                  { name: "เวอร์ชัน", value: $tag, inline: true },
+                  { name: "ดาวน์โหลด", value: ("[TCGStockScanner.exe](" + $dl + ")"), inline: true }
+                ]
+              }]
+            }')
+
+          curl -fsS -H "Content-Type: application/json" -X POST -d "$payload" "$WEBHOOK"
